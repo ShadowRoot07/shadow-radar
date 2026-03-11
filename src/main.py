@@ -20,10 +20,20 @@ class ShadowRadar(discord.Client):
     async def setup_hook(self):
         self.background_task.start()
 
+    
     async def on_ready(self):
         print(f'✅ Radar encendido como {self.user}')
-        await channel.send("🚀 El Radar está online y buscando...")
+        
+        # Primero obtenemos el canal usando el ID guardado
+        channel = self.get_channel(self.channel_id)
+        
+        if channel:
+            await channel.send("🚀 El Radar está online y buscando...")
+        else:
+            print(f"❌ No pude encontrar el canal con ID: {self.channel_id}")
+            
         print(f'📡 Monitoreando: {", ".join(self.subreddits)}')
+
 
     @tasks.loop(minutes=30)
     async def background_task(self):
