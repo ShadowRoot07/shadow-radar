@@ -3,7 +3,7 @@ name: Shadow Radar Runner
 on:
   push:
     branches: [ main ]  # Se activa al hacer push a main
-  schedule:
+  #schedule:
     #- cron: '*/30 * * * *' # Corre cada 30 minutos
   workflow_dispatch:      # Permite activarlo manualmente desde la web o gh cli
 
