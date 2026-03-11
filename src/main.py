@@ -22,6 +22,7 @@ class ShadowRadar(discord.Client):
 
     async def on_ready(self):
         print(f'✅ Radar encendido como {self.user}')
+        await channel.send("🚀 El Radar está online y buscando...")
         print(f'📡 Monitoreando: {", ".join(self.subreddits)}')
 
     @tasks.loop(minutes=30)
