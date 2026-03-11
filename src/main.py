@@ -1,119 +1,81 @@
-import discord
 import os
-import json
-from discord.ext import tasks
+import asyncio
+import discord
+from google import genai
 from dotenv import load_dotenv
-from core.ai_handler import AIHandler
-from modules.reddit_tracker import RedditScraper
 
 load_dotenv()
 
+# Configuración de Clientes
+intents = discord.Intents.default()
+intents.message_content = True
+client_ai = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+
+# --- PROMPTS ---
+PROMPT_PSICOLOGIA = """
+Analiza el siguiente post de Reddit. Si el autor muestra señales claras de crisis emocional, 
+necesidad de terapia profesional o problemas psicológicos serios, responde con un resumen 
+breve y profesional. Si es un problema menor, responde "NO".
+Post: {texto}
+"""
+
+PROMPT_TECH = """
+Analiza el siguiente post o noticia. Si es una noticia MUY destacable de tecnología, 
+IA o programación (nuevos lenguajes, actualizaciones críticas, lanzamientos de impacto), 
+responde con un resumen en ESPAÑOL. Si no es relevante, responde "NO".
+Post: {texto}
+"""
+
 class ShadowRadar(discord.Client):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.ai = AIHandler()
-        self.scraper = RedditScraper()
-        self.channel_id = int(os.getenv("DISCORD_CHANNEL_ID"))
-        self.subreddits = ["desahogo", "psicologia", "Ayuda"]
-        self.seen_posts = set()  # Para no repetir reportes
-
-    async def setup_hook(self):
-        self.background_task.start()
-
-    
     async def on_ready(self):
-        print(f'✅ Radar encendido como {self.user}')
-        
-        # Esto nos dirá en qué servidores está el bot
-        for guild in self.guilds:
-            print(f"🏠 Conectado al servidor: {guild.name} (ID: {guild.id})")
-        
-        channel = self.get_channel(self.channel_id)
-        if channel:
-            await channel.send("🚀 El Radar está online y buscando...")
-        else:
-            print(f"❌ No pude encontrar el canal con ID: {self.channel_id}")
-            # Intento de respaldo: buscar por nombre si el ID falla
-            print("Lista de canales disponibles:")
-            for c in self.get_all_channels():
-                print(f" - # {c.name} (ID: {c.id})")
+        print(f"✅ Radar encendido como {self.user}")
 
+    async def filtrar_con_ai(self, texto, tipo="psico"):
+        prompt = PROMPT_PSICOLOGIA if tipo == "psico" else PROMPT_TECH
+        response = client_ai.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=prompt.format(texto=texto)
+        )
+        return response.text.strip()
 
-    @tasks.loop(minutes=30)
     async def background_task(self):
-        print("🔎 Escaneando subreddits...")
-        channel = self.get_channel(self.channel_id)
+        channel = self.get_channel(int(os.getenv("DISCORD_CHANNEL_ID")))
         if not channel:
-            print("❌ Error: No se encontró el canal de Discord.")
+            print("❌ Error: No se encontró el canal.")
             return
 
-        for sub in self.subreddits:
-            posts = await self.scraper.get_latest_posts(sub)
-            
-            for post in posts:
-                # Evitar duplicados
-                if post['url'] in self.seen_posts:
-                    continue
-                
-                # Pedir a Gemini que analice el post
-                raw_ai_response = self.ai.analyze_lead(f"Título: {post['title']}\nContenido: {post['text']}")
-                
-                try:
-                    # Limpiamos la respuesta por si Gemini añade backticks de markdown
-                    clean_json = raw_ai_response.replace("```json", "").replace("```", "").strip()
-                    analysis = json.loads(clean_json)
+        # Aquí iría tu lógica de scraping de Reddit (PRAW o similar)
+        # Ejemplo simulado de flujo:
+        posts_psico = ["Post 1 sobre desahogo...", "Post 2..."]
+        posts_tech = ["New release of Python 3.14", "Someone fixed a bug in a small library"]
 
-                    if analysis.get("es_potencial") == "SI":
-                        # Creamos una tarjeta (Embed) elegante para tu padre
-                        urgencia = int(analysis.get("urgencia", 1))
-                        color = discord.Color.red() if urgencia > 7 else discord.Color.gold()
-                        
-                        embed = discord.Embed(
-                            title="🎯 Posible Paciente Encontrado",
-                            description=analysis.get("resumen", "Sin resumen"),
-                            color=color,
-                            url=post['url']
-                        )
-                        embed.add_field(name="👤 Usuario", value=f"u/{post['author']}", inline=True)
-                        embed.add_field(name="🚨 Urgencia", value=f"{urgencia}/10", inline=True)
-                        embed.add_field(name="📍 Subreddit", value=f"r/{sub}", inline=True)
-                        embed.set_footer(text="Haz clic en el título para ir al post y contactar por DM.")
+        print("🔎 Escaneando para tu padre...")
+        for p in posts_psico:
+            res = await self.filtrar_con_ai(p, "psico")
+            if res != "NO":
+                await channel.send(f"⚠️ **Oportunidad Terapéutica:**\n{res}")
 
-                        await channel.send(embed=embed)
-                        print(f"✨ Lead enviado: {post['author']}")
-                
-                except Exception as e:
-                    print(f"⚠️ Error procesando post de {post['author']}: {e}")
-                
-                # Marcar como visto
-                self.seen_posts.add(post['url'])
-                
-            # Un pequeño respiro entre subreddits para no saturar
-            await asyncio.sleep(5)
+        print("🔎 Escaneando noticias Tech...")
+        for t in posts_tech:
+            res = await self.filtrar_con_ai(t, "tech")
+            if res != "NO":
+                await channel.send(f"🚀 **Radar Tech:**\n{res}")
 
-# OJO: Necesitamos activar los intents para que el bot pueda leer y enviar
-intents = discord.Intents.default()
-intents.message_content = True 
-
-
+# --- LÓGICA DE EJECUCIÓN ---
 if __name__ == "__main__":
-    import asyncio
-    client = ShadowRadar(intents=intents)
+    bot = ShadowRadar(intents=intents)
 
     async def run_once():
-        await client.login(os.getenv("DISCORD_TOKEN"))
-        # Iniciamos la conexión
-        asyncio.create_task(client.connect())
+        await bot.login(os.getenv("DISCORD_TOKEN"))
+        asyncio.create_task(bot.connect())
         
-        # Esperamos a que el bot esté listo y cargue los canales
         timeout = 0
-        while not client.is_ready() and timeout < 10:
+        while not bot.is_ready() and timeout < 10:
             await asyncio.sleep(1)
             timeout += 1
             
-        await client.on_ready()
-        await client.background_task()
-        await client.close()
+        await bot.background_task()
+        await bot.close()
 
     asyncio.run(run_once())
 
