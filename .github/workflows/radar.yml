@@ -3,8 +3,8 @@ name: Shadow Radar Runner
 on:
   push:
     branches: [ main ]
-  schedule:
-    - cron: '0 */4 * * *'  # Cada 4 horas
+  #schedule:
+   # - cron: '0 */4 * * *'  # Cada 4 horas
   workflow_dispatch:
 
 jobs:
