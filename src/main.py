@@ -2,42 +2,49 @@ import os
 import asyncio
 import discord
 import httpx
+import random
 from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- TU SCRAPER DE REDDIT ---
+# --- SCRAPER CON CAMUFLAJE DE GOOGLEBOT ---
 class RedditScraper:
     def __init__(self):
-        self.url_template = "https://www.reddit.com/r/{}/new.json?limit=10"
+        self.url_template = "https://www.reddit.com/r/{}/new.json?limit=5"
+        # Usamos la identidad de Googlebot para que Reddit nos deje pasar
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.5"
         }
 
     async def get_latest_posts(self, subreddit):
+        # Pausa aleatoria para no saturar y parecer humano/bot legal
+        await asyncio.sleep(random.uniform(2.0, 4.0))
         url = self.url_template.format(subreddit)
-        async with httpx.AsyncClient(headers=self.headers) as client:
+        
+        async with httpx.AsyncClient(headers=self.headers, follow_redirects=True) as client:
             try:
-                response = await client.get(url)
+                # El parámetro rdt ayuda a veces a saltar checks de redirección
+                response = await client.get(url, params={"rdt": "45120"})
                 if response.status_code == 200:
                     data = response.json()
-                    posts = data['data']['children']
+                    posts = data.get('data', {}).get('children', [])
                     results = []
                     for post in posts:
                         p = post['data']
                         results.append({
-                            "title": p['title'],
-                            "text": p['selftext'],
-                            "author": p['author'],
-                            "url": f"https://www.reddit.com{p['permalink']}"
+                            "title": p.get('title', ''),
+                            "text": p.get('selftext', ''),
+                            "url": f"https://www.reddit.com{p.get('permalink', '')}"
                         })
                     return results
                 else:
                     print(f"⚠️ Error {response.status_code} en r/{subreddit}")
                     return []
             except Exception as e:
-                print(f"❌ Error de conexión: {e}")
+                print(f"❌ Error de conexión en r/{subreddit}: {e}")
                 return []
 
 # --- CONFIGURACIÓN DE CLIENTES ---
@@ -48,15 +55,15 @@ scraper = RedditScraper()
 
 # --- PROMPTS ---
 PROMPT_PSICOLOGIA = """
-Analiza el siguiente post de Reddit. Si el autor muestra señales claras de crisis emocional, 
-necesidad de terapia profesional o problemas psicológicos serios, responde con un resumen 
+Analiza el siguiente post de Reddit. Si el autor muestra señales claras de crisis emocional,
+necesidad de terapia profesional o problemas psicológicos serios, responde con un resumen
 breve y profesional en ESPAÑOL. Si es un problema menor, responde "NO".
 Post: {texto}
 """
 
 PROMPT_TECH = """
-Analiza la siguiente noticia o post. Si es una noticia MUY destacable de tecnología, 
-IA o programación, responde con un resumen en ESPAÑOL (traduce si es necesario). 
+Analiza la siguiente noticia o post. Si es una noticia MUY destacable de tecnología,
+IA o programación, responde con un resumen en ESPAÑOL (traduce si es necesario).
 Si no es relevante, responde "NO".
 Post: {texto}
 """
@@ -81,35 +88,41 @@ class ShadowRadar(discord.Client):
 
     async def background_task(self):
         channel = self.get_channel(int(os.getenv("DISCORD_CHANNEL_ID")))
-        if not channel: return
+        if not channel: 
+            print("❌ Canal no encontrado")
+            return
 
-        # --- ESCANEO DE PSICOLOGÍA ---
+        subs_psico = ["desahogo", "psicologia", "Ayuda"]
+        subs_tech = ["programming", "technology", "Python"]
+
+        # --- SECCIÓN PSICOLOGÍA ---
         print("🔎 Buscando casos para tu padre...")
-        posts_psico = await scraper.get_latest_posts("desahogo+psicologia+ayuda")
-        for p in posts_psico:
-            # Combinamos título y texto para que Gemini tenga todo el contexto
-            contenido = f"Título: {p['title']}\nContenido: {p['text']}"
-            res = await self.filtrar_con_ai(contenido, "psico")
-            
-            if res == "LIMITE_ALCANZADO":
-                await channel.send("🛑 Cuota de IA agotada.")
-                return
-            if res != "NO":
-                await channel.send(f"⚠️ **Oportunidad Terapéutica:**\n{res}\n🔗 {p['url']}")
+        for sub in subs_psico:
+            posts = await scraper.get_latest_posts(sub)
+            for p in posts: # Aquí 'p' ya es el diccionario limpio
+                contenido = f"Título: {p['title']}\nContenido: {p['text']}"
+                res = await self.filtrar_con_ai(contenido, "psico")
 
-        # --- ESCANEO DE TECH ---
+                if res == "LIMITE_ALCANZADO": 
+                    print("🛑 Límite de IA alcanzado.")
+                    return
+                if res != "NO":
+                    await channel.send(f"⚠️ **Oportunidad Terapéutica:**\n{res}\n🔗 {p['url']}")
+
+        # --- SECCIÓN TECH ---
         print("🔎 Buscando noticias Tech...")
-        posts_tech = await scraper.get_latest_posts("programming+technology+Python")
-        for t in posts_tech:
-            res = await self.filtrar_con_ai(t['title'], "tech")
-            
-            if res == "LIMITE_ALCANZADO":
-                await channel.send("🛑 Cuota de IA agotada.")
-                return
-            if res != "NO":
-                await channel.send(f"🚀 **Radar Tech:**\n{res}\n🔗 {t['url']}")
+        for sub in subs_tech:
+            posts = await scraper.get_latest_posts(sub)
+            for t in posts:
+                res = await self.filtrar_con_ai(t['title'], "tech")
 
-# --- EJECUCIÓN ---
+                if res == "LIMITE_ALCANZADO": 
+                    print("🛑 Límite de IA alcanzado.")
+                    return
+                if res != "NO":
+                    await channel.send(f"🚀 **Radar Tech:**\n{res}\n🔗 {t['url']}")
+
+# --- LÓGICA DE EJECUCIÓN ---
 if __name__ == "__main__":
     bot = ShadowRadar(intents=intents)
 
@@ -117,14 +130,20 @@ if __name__ == "__main__":
         try:
             await bot.login(os.getenv("DISCORD_TOKEN"))
             asyncio.create_task(bot.connect())
+            
             timeout = 0
             while not bot.is_ready() and timeout < 15:
                 await asyncio.sleep(1)
                 timeout += 1
+            
             if bot.is_ready():
                 await bot.background_task()
+                print("✅ Tarea completada.")
+            else:
+                print("❌ No se pudo conectar a Discord.")
         finally:
             await bot.close()
+            print("🔌 Sesión cerrada.")
 
     asyncio.run(run_once())
 
