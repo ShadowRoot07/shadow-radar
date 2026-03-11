@@ -24,15 +24,19 @@ class ShadowRadar(discord.Client):
     async def on_ready(self):
         print(f'✅ Radar encendido como {self.user}')
         
-        # Primero obtenemos el canal usando el ID guardado
-        channel = self.get_channel(self.channel_id)
+        # Esto nos dirá en qué servidores está el bot
+        for guild in self.guilds:
+            print(f"🏠 Conectado al servidor: {guild.name} (ID: {guild.id})")
         
+        channel = self.get_channel(self.channel_id)
         if channel:
             await channel.send("🚀 El Radar está online y buscando...")
         else:
             print(f"❌ No pude encontrar el canal con ID: {self.channel_id}")
-            
-        print(f'📡 Monitoreando: {", ".join(self.subreddits)}')
+            # Intento de respaldo: buscar por nombre si el ID falla
+            print("Lista de canales disponibles:")
+            for c in self.get_all_channels():
+                print(f" - # {c.name} (ID: {c.id})")
 
 
     @tasks.loop(minutes=30)
