@@ -1,10 +1,10 @@
-import google.generativeai as genai
+from google import genai
 import os
 
 class AIHandler:
     def __init__(self):
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        # El nuevo SDK usa el cliente directamente
+        self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
     def analyze_lead(self, text):
         prompt = f"""
@@ -20,7 +20,11 @@ class AIHandler:
         }}
         """
         try:
-            response = self.model.generate_content(prompt)
+            # Nueva forma de llamar a Gemini 1.5 Flash
+            response = self.client.models.generate_content(
+                model="gemini-1.5-flash", 
+                contents=prompt
+            )
             return response.text
         except Exception as e:
             return f"Error en IA: {e}"
