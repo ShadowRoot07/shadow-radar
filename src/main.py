@@ -96,16 +96,23 @@ intents = discord.Intents.default()
 intents.message_content = True 
 
 
-# Cambia esto al final de tu archivo main.py
 if __name__ == "__main__":
     import asyncio
     client = ShadowRadar(intents=intents)
-    
-    # Esta lógica es para que el bot corra una vez y se cierre (ideal para Actions)
+
     async def run_once():
         await client.login(os.getenv("DISCORD_TOKEN"))
+        # Iniciamos la conexión
+        asyncio.create_task(client.connect())
+        
+        # Esperamos a que el bot esté listo y cargue los canales
+        timeout = 0
+        while not client.is_ready() and timeout < 10:
+            await asyncio.sleep(1)
+            timeout += 1
+            
         await client.on_ready()
-        await client.background_task() # Ejecuta el escaneo
+        await client.background_task()
         await client.close()
 
     asyncio.run(run_once())
