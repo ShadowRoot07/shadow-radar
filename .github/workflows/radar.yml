@@ -30,8 +30,8 @@ jobs:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
-          # PYTHONPATH asegura que main.py encuentre los módulos en src/modules
           PYTHONPATH: ${{ github.workspace }}/src
-        # -u fuerza a Python a mostrar los prints inmediatamente sin esperar al buffer
-        run: python -u src/main.py
+        run: |
+          ls -R
+          python -u src/main.py
 
