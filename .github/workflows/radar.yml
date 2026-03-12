@@ -3,9 +3,9 @@ name: Shadow Radar Runner
 on:
   push:
     branches: [ main ]
-  #schedule:
-   # - cron: '0 */4 * * *'  # Cada 4 horas
-  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'  # Se ejecuta cada 6 horas exactamente
+  workflow_dispatch: # Permite ejecutarlo manualmente para pruebas
 
 jobs:
   run-radar:
@@ -18,7 +18,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip' # Optimiza las ejecuciones repetitivas
+          cache: 'pip'
 
       - name: Instalar dependencias
         run: |
@@ -31,7 +31,5 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
           PYTHONPATH: ${{ github.workspace }}/src
-        run: |
-          ls -R
-          python -u src/main.py
+        run: python -u src/main.py
 
