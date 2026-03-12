@@ -10,17 +10,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- PROMPTS RESTRICTIVOS (VUELVEN A LA NORMALIDAD) ---
+# --- PROMPTS DE PRODUCCIÓN ---
 PROMPT_PSICOLOGIA = """
 Analiza el siguiente post. Si el autor muestra señales de crisis emocional seria, 
 necesidad de terapia o problemas psicológicos graves, resume en ESPAÑOL. 
-Si no es urgente, responde "NO".
+Si no es urgente o es trivial, responde "NO".
 Post: {texto}
 """
 
 PROMPT_TECH = """
-Si esta es una noticia de tecnología o programación REALMENTE relevante o novedosa, 
-resúmela en ESPAÑOL. Si es una duda simple o poco importante, responde "NO".
+Si esta es una noticia de tecnología o programación REALMENTE relevante, innovadora 
+o de gran impacto, resúmela en ESPAÑOL. Si es una duda simple, responde "NO".
 Post: {texto}
 """
 
@@ -39,19 +39,19 @@ class RedditScraper:
                 response = await client.get(url)
                 if response.status_code == 200:
                     xml = response.text
-                    # Extraer bloques de entrada <entry>...</entry>
                     entries = re.findall(r'<entry>(.*?)</entry>', xml, re.DOTALL)
                     results = []
                     
                     for entry in entries:
-                        # Extraer fecha de actualización
-                        updated_str = re.search(r'<updated>(.*?)</updated>', entry).group(1)
-                        # Formato: 2026-03-12T13:00:00+00:00
-                        dt_updated = datetime.fromisoformat(updated_str)
+                        # Extraer fecha
+                        updated_match = re.search(r'<updated>(.*?)</updated>', entry)
+                        if not updated_match: continue
+                        
+                        dt_updated = datetime.fromisoformat(updated_match.group(1))
                         ahora = datetime.now(timezone.utc)
                         diferencia_minutos = (ahora - dt_updated).total_seconds() / 60
 
-                        # SOLO POSTS DE LA ÚLTIMA HORA (60 min)
+                        # Solo posts de la última hora
                         if diferencia_minutos <= 60:
                             title = re.search(r'<title>(.*?)</title>', entry).group(1)
                             link = re.search(r'<link href="(https://www.reddit.com/r/[^"]+)"', entry).group(1)
@@ -62,14 +62,14 @@ class RedditScraper:
                                 "url": link
                             })
                     return results, None
-                return [], f"📡 Código {response.status_code}"
+                return [], f"Error {response.status_code}"
             except Exception as e:
                 return [], str(e)
 
 client_ai = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 class ShadowRadar(discord.Client):
-    quota_exceeded = False # Bandera para dejar de llamar a Gemini si da 429
+    quota_exceeded = False
 
     async def filtrar_con_ai(self, texto, tipo="psico"):
         if self.quota_exceeded: return "QUOTA_ERROR"
@@ -78,15 +78,14 @@ class ShadowRadar(discord.Client):
         prompt_base = PROMPT_PSICOLOGIA if tipo == "psico" else PROMPT_TECH
         
         try:
-            # Delay anti-spam para la API (2 segundos entre llamadas)
-            await asyncio.sleep(2) 
+            await asyncio.sleep(2) # Respetar RPM de Gemini
             response = client_ai.models.generate_content(
                 model="gemini-2.0-flash", 
                 contents=prompt_base.format(texto=texto_plano)
             )
             return response.text.strip()
         except Exception as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            if "429" in str(e) or "QUOTA" in str(e).upper():
                 self.quota_exceeded = True
                 return "QUOTA_ERROR"
             return "NO"
@@ -95,9 +94,10 @@ class ShadowRadar(discord.Client):
         channel = self.get_channel(int(os.getenv("DISCORD_CHANNEL_ID")))
         if not channel: return
 
-        await channel.send("🛰️ **Shadow Radar:** Iniciando patrullaje de posts recientes (última hora)...")
+        # 1. Mensaje de Encendido
+        await channel.send("🚀 **Shadow Radar Online:** Iniciando patrullaje preventivo...")
 
-        subs_psico = ["desahogo", "psicologia"]
+        subs_psico = ["desahogo", "psicologia", "ayuda"]
         subs_tech = ["programming", "technology", "python"]
         scraper = RedditScraper()
 
@@ -108,14 +108,16 @@ class ShadowRadar(discord.Client):
                     res = await self.filtrar_con_ai(f"{p['title']}\n{p['text']}", tipo)
                     
                     if res == "QUOTA_ERROR":
-                        await channel.send("⚠️ **Aviso:** Se ha agotado la cuota de Gemini por ahora. El resto de posts se ignorarán.")
-                        return # Abortar escaneo para no saturar más
+                        # 2. Mensaje si se acaban las cuotas
+                        await channel.send("⚠️ **Límite Alcanzado:** Gemini ha agotado la cuota de peticiones (Error 429). El patrullaje se detendrá aquí.")
+                        return 
 
                     if res and res.upper() != "NO":
                         emoji = "🧠" if tipo == "psico" else "💻"
                         await channel.send(f"{emoji} **Radar {cat} (r/{sub}):**\n> {res}\n🔗 {p['url']}")
 
-        await channel.send("🏁 **Patrullaje finalizado.**")
+        # 3. Mensaje de Finalización
+        await channel.send("🏁 **Patrullaje Completado:** Todos los subreddits han sido revisados. Entrando en modo reposo.")
 
 if __name__ == "__main__":
     bot = ShadowRadar(intents=discord.Intents.default())
@@ -129,5 +131,6 @@ if __name__ == "__main__":
             if bot.is_ready(): await bot.background_task()
         finally:
             await bot.close()
+            print("🔌 Bot desconectado.")
     asyncio.run(run())
 
