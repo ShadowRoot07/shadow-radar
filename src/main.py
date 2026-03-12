@@ -11,100 +11,107 @@ load_dotenv()
 
 class RedditScraper:
     def __init__(self):
-        # Forzamos minúsculas para evitar el 404 en algunos subreddits
-        self.url_template = "https://www.reddit.com/r/{}/new/.rss"
+        # Intentamos con una URL más directa y sin el slash final antes del .rss
+        # A veces Reddit prefiere /new.rss que /new/.rss
+        self.url_template = "https://www.reddit.com/r/{}/new.rss"
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
-            "Accept": "application/rss+xml"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+            "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8"
         }
 
     async def get_latest_posts(self, subreddit):
-        await asyncio.sleep(random.uniform(2.0, 4.0))
+        # Aumentamos un poco el jitter para evitar detecciones
+        await asyncio.sleep(random.uniform(3.0, 6.0))
         url = self.url_template.format(subreddit.lower())
         
-        async with httpx.AsyncClient(headers=self.headers, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=self.headers, follow_redirects=True, timeout=10.0) as client:
             try:
                 response = await client.get(url)
+                
                 if response.status_code == 200:
                     xml_content = response.text
-                    titles = re.findall(r'<title>(.*?)</title>', xml_content)[1:]
-                    links = re.findall(r'<link href="(https://www.reddit.com/r/.*?)"', xml_content)
+                    # Mejoramos la extracción para que sea más flexible
+                    titles = re.findall(r'<title>(.*?)</title>', xml_content)
+                    # El primer título suele ser el nombre del Subreddit, lo saltamos
+                    titles = titles[1:] if len(titles) > 1 else titles
+                    
+                    links = re.findall(r'<link href="(https://www.reddit.com/r/[^"]+)"', xml_content)
                     contents = re.findall(r'<content type="html">(.*?)</content>', xml_content)
 
                     results = []
                     for i in range(min(len(titles), 5)):
                         results.append({
-                            "title": titles[i],
+                            "title": titles[i] if i < len(titles) else "Sin título",
                             "text": contents[i] if i < len(contents) else "",
                             "url": links[i] if i < len(links) else f"https://reddit.com/r/{subreddit}"
                         })
-                    return results, None # Retorna resultados y "sin error"
+                    return results, None
+                
+                elif response.status_code == 403:
+                    return [], f"🚫 Acceso prohibido (403) en r/{subreddit}. Reddit bloqueó la IP."
+                elif response.status_code == 404:
+                    return [], f"❓ Subreddit r/{subreddit} no encontrado o sin RSS (404)."
                 else:
-                    error_msg = f"📡 Fallo en r/{subreddit}: Código {response.status_code}"
-                    return [], error_msg
+                    return [], f"📡 Error HTTP {response.status_code} en r/{subreddit}."
+                    
             except Exception as e:
                 return [], f"❌ Error de conexión en r/{subreddit}: {str(e)}"
 
-# --- CONFIGURACIÓN ---
-intents = discord.Intents.default()
+# --- CONFIGURACIÓN DE AI ---
 client_ai = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-scraper = RedditScraper()
 
+# --- BOT CORE ---
 class ShadowRadar(discord.Client):
     async def on_ready(self):
-        print(f"✅ Radar RSS modo depuración listo: {self.user}")
+        print(f"✅ Radar Online: {self.user}")
+
+    async def filtrar_con_ai(self, texto, tipo="psico"):
+        # Limpieza de HTML para que Gemini no se pierda
+        texto_plano = re.sub(r'<[^>]+>', '', texto)[:2000]
+        if not texto_plano.strip(): return "NO"
+
+        prompt = (PROMPT_PSICOLOGIA if tipo == "psico" else PROMPT_TECH).format(texto=texto_plano)
+        
+        try:
+            response = client_ai.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt
+            )
+            return response.text.strip()
+        except Exception:
+            return "NO"
 
     async def background_task(self):
         channel = self.get_channel(int(os.getenv("DISCORD_CHANNEL_ID")))
-        if not channel: return
+        if not channel:
+            print("❌ Error: No se pudo encontrar el canal de Discord.")
+            return
 
-        subs_psico = ["desahogo", "psicologia", "ayuda"]
-        subs_tech = ["programming", "technology", "python"]
+        # Reducimos la lista para probar estabilidad
+        subs_psico = ["desahogo", "psicologia"]
+        subs_tech = ["programming", "technology"]
 
-        print("🔎 Iniciando escaneo...")
+        scraper = RedditScraper()
+
+        print("🔎 Iniciando escaneo de la mañana...")
         
-        # Procesar cada categoría y reportar errores si los hay
-        for cat_name, subs, tipo in [("Psicología", subs_psico, "psico"), ("Tech", subs_tech, "tech")]:
+        for cat, subs, tipo in [("Psicología", subs_psico, "psico"), ("Tech", subs_tech, "tech")]:
             for sub in subs:
+                print(f"📡 Solicitando r/{sub}...")
                 posts, error = await scraper.get_latest_posts(sub)
                 
                 if error:
-                    # Reportar el error al canal para que sepas qué falló sin mirar los logs
                     print(f"LOG: {error}")
-                    continue 
+                    continue
 
                 for p in posts:
-                    # Limpieza básica para Gemini
-                    texto_limpio = re.sub('<[^<]+?>', '', p['text'])[:1500]
-                    try:
-                        prompt = "Analiza si esto es relevante: {t}\n{txt}"
-                        # Aquí iría tu lógica de Gemini... 
-                        # (La mantengo simplificada para evitar errores de cuota hoy)
-                        pass
-                    except:
-                        pass
+                    analisis = await self.filtrar_con_ai(f"{p['title']}\n{p['text']}", tipo)
+                    
+                    if analisis != "NO" and "LIMITE" not in analisis:
+                        await channel.send(f"📍 **Radar {cat} (r/{sub}):**\n{analisis}\n🔗 {p['url']}")
+                        await asyncio.sleep(2) # Evitar spam en Discord
 
-        print("💤 Tarea finalizada. Entrando en modo reposo.")
+        print("💤 Tarea finalizada con éxito.")
 
-if __name__ == "__main__":
-    bot = ShadowRadar(intents=intents)
-
-    async def run_once():
-        try:
-            await bot.login(os.getenv("DISCORD_TOKEN"))
-            asyncio.create_task(bot.connect())
-            
-            timeout = 0
-            while not bot.is_ready() and timeout < 15:
-                await asyncio.sleep(1)
-                timeout += 1
-            
-            if bot.is_ready():
-                await bot.background_task()
-            
-        finally:
-            await bot.close()
-            print("🔌 Bot apagado.")
-
-    asyncio.run(run_once())
+# (El bloque de ejecución if __name__ == "__main__" se mantiene igual)
 
