@@ -1,113 +1,86 @@
 import os
 import asyncio
 import discord
-import httpx
-import random
-import re
-from datetime import datetime, timezone
-from google import genai
 from dotenv import load_dotenv
+
+# Importamos tus clases personalizadas
+from core.ai_handler import AIHandler
+from modules.reddit_tracker import RedditScraper
 
 load_dotenv()
 
-# --- PROMPTS DE ALTA RELEVANCIA ---
-PROMPT_PSICOLOGIA = """
-Analiza este post. Si el autor muestra señales de crisis emocional grave o riesgo, 
-resume en ESPAÑOL de forma profesional. Si es un desahogo común o no es urgente, responde "NO".
-Post: {texto}
-"""
-
-PROMPT_TECH = """
-Si esta noticia es un hito importante en IA, programación o tecnología (no dudas simples), 
-resúmela en ESPAÑOL. Si no es altamente relevante, responde "NO".
-Post: {texto}
-"""
-
-class RedditScraper:
-    def __init__(self):
-        self.url_template = "https://www.reddit.com/r/{}/new.rss"
-        self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/123.0"}
-
-    async def get_latest_posts(self, subreddit):
-        await asyncio.sleep(random.uniform(2.0, 4.0))
-        url = self.url_template.format(subreddit.lower())
-        async with httpx.AsyncClient(headers=self.headers, follow_redirects=True, timeout=15.0) as client:
-            try:
-                response = await client.get(url)
-                if response.status_code == 200:
-                    entries = re.findall(r'<entry>(.*?)</entry>', response.text, re.DOTALL)
-                    results = []
-                    for entry in entries:
-                        updated_match = re.search(r'<updated>(.*?)</updated>', entry)
-                        if not updated_match: continue
-                        
-                        dt_updated = datetime.fromisoformat(updated_match.group(1))
-                        ahora = datetime.now(timezone.utc)
-                        # FILTRO DE 6 HORAS (360 minutos)
-                        if (ahora - dt_updated).total_seconds() / 60 <= 360:
-                            title = re.search(r'<title>(.*?)</title>', entry).group(1)
-                            link = re.search(r'<link href="(https://www.reddit.com/r/[^"]+)"', entry).group(1)
-                            content = re.search(r'<content type="html">(.*?)</content>', entry, re.DOTALL)
-                            results.append({"title": title, "text": content.group(1) if content else "", "url": link})
-                    return results, None
-                return [], f"Error {response.status_code}"
-            except Exception as e:
-                return [], str(e)
-
-client_ai = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+# Prompts refinados para máxima relevancia
+PROMPT_PSICO = "Analiza si este post muestra crisis emocional grave o riesgo. Resume en ESPAÑOL profesional. Si no es urgente, responde 'NO'."
+PROMPT_TECH = "Si esta noticia es un hito importante en tecnología o IA (novedad real), resume en ESPAÑOL. Si no es relevante, responde 'NO'."
 
 class ShadowRadar(discord.Client):
-    quota_exceeded = False
-
-    async def filtrar_con_ai(self, texto, tipo="psico"):
-        if self.quota_exceeded: return "QUOTA_ERROR"
-        texto_plano = re.sub(r'<[^>]+>', '', texto).strip()[:1500]
-        prompt_base = PROMPT_PSICOLOGIA if tipo == "psico" else PROMPT_TECH
-        try:
-            await asyncio.sleep(2) 
-            response = client_ai.models.generate_content(model="gemini-2.0-flash", contents=prompt_base.format(texto=texto_plano))
-            return response.text.strip()
-        except Exception as e:
-            if "429" in str(e) or "QUOTA" in str(e).upper():
-                self.quota_exceeded = True
-                return "QUOTA_ERROR"
-            return "NO"
-
     async def background_task(self):
         channel = self.get_channel(int(os.getenv("DISCORD_CHANNEL_ID")))
-        if not channel: return
+        if not channel:
+            print("❌ Canal no encontrado.")
+            return
 
-        await channel.send("🚀 **Shadow Radar:** Iniciando patrullaje de las últimas 6 horas...")
-
+        ai = AIHandler()
+        scraper = RedditScraper()
+        
         subs_psico = ["desahogo", "psicologia", "ayuda"]
         subs_tech = ["programming", "technology", "python"]
-        scraper = RedditScraper()
 
-        for cat, subs, tipo in [("Psicología", subs_psico, "psico"), ("Tecnología", subs_tech, "tech")]:
-            for sub in subs:
-                posts, _ = await scraper.get_latest_posts(sub)
-                for p in posts:
-                    res = await self.filtrar_con_ai(f"{p['title']}\n{p['text']}", tipo)
-                    if res == "QUOTA_ERROR":
-                        await channel.send("⚠️ **Fuera de Servicio:** Cuota de Gemini agotada (Error 429).")
-                        return 
-                    if res and res.upper() != "NO":
-                        emoji = "🧠" if tipo == "psico" else "💻"
-                        await channel.send(f"{emoji} **Radar {cat} (r/{sub}):**\n> {res}\n🔗 {p['url']}")
+        print("🛰️ Iniciando patrullaje...")
 
-        await channel.send("🏁 **Patrullaje finalizado.** Siguiente revisión en 6 horas.")
+        # Procesar Categoría Psicología
+        for sub in subs_psico:
+            # Usamos tu scraper de RSS que ya funciona
+            posts, error = await scraper.get_latest_posts(sub)
+            if error:
+                print(f"⚠️ Error en r/{sub}: {error}")
+                continue
+
+            for p in posts:
+                # Usamos tu AIHandler de core/ai_handler.py
+                # Nota: Ajustado para usar el prompt de relevancia
+                res = await ai.analyze_text(f"{p['title']}\n{p['text']}", PROMPT_PSICO)
+                
+                if res == "QUOTA_ERROR":
+                    await channel.send("⚠️ **Aviso:** Cuota de Gemini agotada en este ciclo.")
+                    return # Detenemos para no saturar
+
+                if res and res.upper() != "NO":
+                    await channel.send(f"🧠 **Radar Psico (r/{sub}):**\n> {res}\n🔗 {p['url']}")
+
+        # Procesar Categoría Tecnología
+        for sub in subs_tech:
+            if ai.quota_exceeded: break
+            posts, _ = await scraper.get_latest_posts(sub)
+            
+            for p in posts:
+                res = await ai.analyze_text(f"{p['title']}\n{p['text']}", PROMPT_TECH)
+                
+                if res == "QUOTA_ERROR": break
+                
+                if res and res.upper() != "NO":
+                    await channel.send(f"💻 **Radar Tech (r/{sub}):**\n> {res}\n🔗 {p['url']}")
+
+        print("🏁 Ciclo completado.")
 
 if __name__ == "__main__":
-    bot = ShadowRadar(intents=discord.Intents.default())
-    async def run_once():
+    intents = discord.Intents.default()
+    bot = ShadowRadar(intents=intents)
+
+    async def run():
         try:
             await bot.login(os.getenv("DISCORD_TOKEN"))
             asyncio.create_task(bot.connect())
+            
+            # Esperar a que el bot esté listo
             for _ in range(15):
                 if bot.is_ready(): break
                 await asyncio.sleep(1)
-            if bot.is_ready(): await bot.background_task()
+            
+            if bot.is_ready():
+                await bot.background_task()
         finally:
             await bot.close()
-    asyncio.run(run_once())
+
+    asyncio.run(run())
 

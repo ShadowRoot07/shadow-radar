@@ -1,31 +1,26 @@
-from google import genai
 import os
+import asyncio
+from google import genai
 
 class AIHandler:
     def __init__(self):
-        # El nuevo SDK usa el cliente directamente
         self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        self.quota_exceeded = False
 
-    def analyze_lead(self, text):
-        prompt = f"""
-        Analiza el siguiente post de redes sociales y determina si la persona busca ayuda psicológica o expresa problemas de salud mental serios.
+    async def analyze_text(self, text, prompt_intro):
+        if self.quota_exceeded: return "QUOTA_ERROR"
         
-        Post: "{text}"
-        
-        Responde estrictamente en este formato JSON:
-        {{
-            "es_potencial": "SI/NO",
-            "urgencia": 1-10,
-            "resumen": "breve resumen de 10 palabras"
-        }}
-        """
         try:
-            # Nueva forma de llamar a Gemini 1.5 Flash
+            # Pequeño respiro para la API
+            await asyncio.sleep(2)
             response = self.client.models.generate_content(
-                model="gemini-1.5-flash", 
-                contents=prompt
+                model="gemini-2.0-flash",
+                contents=f"{prompt_intro}\n\nPost: {text[:1200]}"
             )
-            return response.text
+            return response.text.strip()
         except Exception as e:
-            return f"Error en IA: {e}"
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                self.quota_exceeded = True
+                return "QUOTA_ERROR"
+            return "NO"
 
