@@ -35,39 +35,37 @@ class ShadowRadar(discord.Client):
                 (subs_tech, "Si esta noticia es un hito importante en tecnología o IA, resume en ESPAÑOL. Si no es relevante, responde 'NO'.", "💻 Radar Tech")
             ]
 
-            quota_exhausted = False
-
             for group, prompt, tag in all_subs:
-                if quota_exhausted: break
-
                 for sub in group:
-                    if quota_exhausted: break
-                    
                     print(f"🛰️ Patrullando r/{sub}...")
-                    # Limitamos a los 5 más recientes para no saturar la API
                     posts, error = await scraper.get_latest_posts(sub)
                     
                     if error:
                         print(f"⚠️ Error en r/{sub}: {error}")
                         continue
 
-                    for p in posts[:5]: # Solo los 5 posts más nuevos por sub
-                        # ⏱️ SLEEP ESTRATÉGICO: 
-                        # Esperamos 6 segundos entre cada llamada a la IA.
-                        # Esto asegura un máximo de 10 peticiones por minuto (Límite es 15).
-                        await asyncio.sleep(6)
+                    # Solo procesamos los 3 posts más recientes para cuidar la cuota
+                    for p in posts[:3]:
+                        # ⏱️ SLEEP ULTRA-SAFE: 10 segundos entre posts
+                        await asyncio.sleep(10)
 
                         res = await ai.analyze_text(f"{p['title']}\n{p['text']}", prompt)
                         
                         if res == "QUOTA_ERROR":
-                            await channel.send("⚠️ **Límite de API:** Cuota de Gemini agotada. Deteniendo patrullaje.")
-                            quota_exhausted = True
-                            break
+                            # Si da error, esperamos 30 segundos y reintentamos UNA vez
+                            print("⏳ Cuota saturada. Reintentando en 30s...")
+                            await asyncio.sleep(30)
+                            res = await ai.analyze_text(f"{p['title']}\n{p['text']}", prompt)
+                            
+                            if res == "QUOTA_ERROR":
+                                await channel.send("🛑 **Pausa Forzada:** Cuota diaria de Gemini agotada.")
+                                await self.close()
+                                return
 
                         if res and res.upper() != "NO":
                             await channel.send(f"{tag} (r/{sub}):\n> {res}\n🔗 {p['url']}")
 
-            await channel.send("🏁 **Patrullaje finalizado.**")
+            await channel.send("🏁 **Patrullaje finalizado con éxito.**")
 
         except Exception as e:
             print(f"💥 Error crítico: {e}")
