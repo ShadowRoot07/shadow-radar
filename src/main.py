@@ -2,53 +2,82 @@ import os
 import asyncio
 import discord
 from dotenv import load_dotenv
-
-# Importamos tus clases originales
 from core.ai_handler import AIHandler
 from modules.reddit_tracker import RedditScraper
 
 load_dotenv()
 
-PROMPT_PSICO = "Analiza si este post muestra crisis emocional grave o riesgo. Resume en ESPAÑOL profesional. Si no es urgente, responde 'NO'."
-PROMPT_TECH = "Si esta noticia es un hito importante en tecnología o IA, resume en ESPAÑOL. Si no es relevante, responde 'NO'."
-
 class ShadowRadar(discord.Client):
-    async def background_task(self):
-        channel = self.get_channel(int(os.getenv("DISCORD_CHANNEL_ID")))
-        if not channel: return
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.scanning = False
 
-        ai = AIHandler()
-        scraper = RedditScraper()
+    async def on_ready(self):
+        # Evitamos que se ejecute dos veces si el bot se reconecta
+        if self.scanning:
+            return
         
-        # 1. Mensaje de Inicio
-        await channel.send("🚀 **Shadow Radar:** Iniciando patrullaje preventivo...")
+        self.scanning = True
+        print(f"✅ Bot conectado como {self.user}")
+        
+        channel = self.get_channel(int(os.getenv("DISCORD_CHANNEL_ID")))
+        if not channel:
+            print("❌ Canal no encontrado.")
+            await self.close()
+            return
 
-        subs_psico = ["desahogo", "psicologia", "ayuda"]
-        subs_tech = ["programming", "technology", "python"]
+        try:
+            ai = AIHandler()
+            scraper = RedditScraper()
+            
+            await channel.send("🚀 **Shadow Radar:** Iniciando patrullaje preventivo...")
 
-        # Procesar Psicología
-        for sub in subs_psico:
-            # Volvemos al desempaquetado correcto (posts, error) del RSS
-            posts, error = await scraper.get_latest_posts(sub)
-            if error:
-                print(f"⚠️ Error en r/{sub}: {error}")
-                continue
+            subs_psico = ["desahogo", "psicologia", "ayuda"]
+            subs_tech = ["programming", "technology", "python"]
 
-            for p in posts:
-                # p es un dict con 'title', 'text', 'url' (formato RSS)
-                res = await ai.analyze_text(f"{p['title']}\n{p['text']}", PROMPT_PSICO)
-                if res == "QUOTA_ERROR":
-                    await channel.send("⚠️ **Fuera de Servicio:** Cuota de Gemini agotada (429).")
-                    return
-                if res and res.upper() != "NO":
-                    await channel.send(f"🧠 **Radar Psico (r/{sub}):**\n> {res}\n🔗 {p['url']}")
+            # --- Lógica de escaneo (Simplificada para asegurar éxito) ---
+            all_subs = [
+                (subs_psico, "Analiza si este post muestra crisis emocional grave o riesgo. Resume en ESPAÑOL profesional. Si no es urgente, responde 'NO'.", "🧠 Radar Psico"),
+                (subs_tech, "Si esta noticia es un hito importante en tecnología o IA, resume en ESPAÑOL. Si no es relevante, responde 'NO'.", "💻 Radar Tech")
+            ]
 
-        # Procesar Tecnología
-        for sub in subs_tech:
-            if ai.quota_exceeded: break
-            posts, _ = await scraper.get_latest_posts(sub)
-            if not posts: continue
+            for group, prompt, tag in all_subs:
+                for sub in group:
+                    print(f"🛰️ Patrullando r/{sub}...")
+                    posts, error = await scraper.get_latest_posts(sub)
+                    
+                    if error:
+                        print(f"⚠️ Error en r/{sub}: {error}")
+                        continue
 
-            for p in posts:
-                res = await ai
+                    for p in posts:
+                        res = await ai.analyze_text(f"{p['title']}\n{p['text']}", prompt)
+                        if res == "QUOTA_ERROR":
+                            await channel.send("⚠️ **Límite alcanzado:** Gemini agotado por ahora.")
+                            break
+                        
+                        if res and res.upper() != "NO":
+                            await channel.send(f"{tag} (r/{sub}):\n> {res}\n🔗 {p['url']}")
+
+            await channel.send("🏁 **Patrullaje finalizado.**")
+        
+        except Exception as e:
+            print(f"💥 Error crítico: {e}")
+        finally:
+            print("🔌 Cerrando conexión...")
+            await self.close()
+
+if __name__ == "__main__":
+    intents = discord.Intents.default()
+    bot = ShadowRadar(intents=intents)
+    
+    # El método start() mantiene el script vivo
+    async def main():
+        async with bot:
+            await bot.start(os.getenv("DISCORD_TOKEN"))
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
 
