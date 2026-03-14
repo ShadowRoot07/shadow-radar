@@ -3,21 +3,20 @@ import asyncio
 import discord
 from dotenv import load_dotenv
 
-# Importamos tus clases personalizadas
+# Importamos tus clases
 from core.ai_handler import AIHandler
 from modules.reddit_tracker import RedditScraper
 
 load_dotenv()
 
-# Prompts refinados para máxima relevancia
 PROMPT_PSICO = "Analiza si este post muestra crisis emocional grave o riesgo. Resume en ESPAÑOL profesional. Si no es urgente, responde 'NO'."
-PROMPT_TECH = "Si esta noticia es un hito importante en tecnología o IA (novedad real), resume en ESPAÑOL. Si no es relevante, responde 'NO'."
+PROMPT_TECH = "Si esta noticia es un hito importante en tecnología o IA, resume en ESPAÑOL. Si no es relevante, responde 'NO'."
 
 class ShadowRadar(discord.Client):
     async def background_task(self):
         channel = self.get_channel(int(os.getenv("DISCORD_CHANNEL_ID")))
         if not channel:
-            print("❌ Canal no encontrado.")
+            print("❌ Canal de Discord no encontrado.")
             return
 
         ai = AIHandler()
@@ -28,40 +27,43 @@ class ShadowRadar(discord.Client):
 
         print("🛰️ Iniciando patrullaje...")
 
-        # Procesar Categoría Psicología
-        for sub in subs_psico:
-            # Usamos tu scraper de RSS que ya funciona
-            posts, error = await scraper.get_latest_posts(sub)
-            if error:
-                print(f"⚠️ Error en r/{sub}: {error}")
-                continue
+        # Categorías a procesar
+        categorias = [
+            (subs_psico, PROMPT_PSICO, "🧠 **Radar Psico**"),
+            (subs_tech, PROMPT_TECH, "💻 **Radar Tech**")
+        ]
 
-            for p in posts:
-                # Usamos tu AIHandler de core/ai_handler.py
-                # Nota: Ajustado para usar el prompt de relevancia
-                res = await ai.analyze_text(f"{p['title']}\n{p['text']}", PROMPT_PSICO)
+        for subs, prompt, tag in categorias:
+            for sub in subs:
+                # Corregimos el desempaquetado de posts
+                posts = await scraper.get_latest_posts(sub)
                 
-                if res == "QUOTA_ERROR":
-                    await channel.send("⚠️ **Aviso:** Cuota de Gemini agotada en este ciclo.")
-                    return # Detenemos para no saturar
+                # Si scraper devuelve [] o None, evitamos el crash
+                if not posts:
+                    continue
 
-                if res and res.upper() != "NO":
-                    await channel.send(f"🧠 **Radar Psico (r/{sub}):**\n> {res}\n🔗 {p['url']}")
+                for p in posts:
+                    # En RedditScraper JSON, el post es un dict. 
+                    # Extraemos título y texto según la estructura de Reddit
+                    try:
+                        data = p.get('data', {})
+                        titulo = data.get('title', '')
+                        texto = data.get('selftext', '')
+                        url = f"https://reddit.com{data.get('permalink', '')}"
+                        
+                        res = await ai.analyze_text(f"{titulo}\n{texto}", prompt)
+                        
+                        if res == "QUOTA_ERROR":
+                            await channel.send("⚠️ **Aviso:** Cuota de Gemini agotada.")
+                            return
 
-        # Procesar Categoría Tecnología
-        for sub in subs_tech:
-            if ai.quota_exceeded: break
-            posts, _ = await scraper.get_latest_posts(sub)
-            
-            for p in posts:
-                res = await ai.analyze_text(f"{p['title']}\n{p['text']}", PROMPT_TECH)
-                
-                if res == "QUOTA_ERROR": break
-                
-                if res and res.upper() != "NO":
-                    await channel.send(f"💻 **Radar Tech (r/{sub}):**\n> {res}\n🔗 {p['url']}")
+                        if res and res.upper() != "NO":
+                            await channel.send(f"{tag} (r/{sub}):\n> {res}\n🔗 {url}")
+                    except Exception as e:
+                        print(f"Error procesando post: {e}")
+                        continue
 
-        print("🏁 Ciclo completado.")
+        print("🏁 Patrullaje finalizado con éxito.")
 
 if __name__ == "__main__":
     intents = discord.Intents.default()
@@ -70,6 +72,10 @@ if __name__ == "__main__":
     async def run():
         try:
             await bot.login(os.getenv("DISCORD_TOKEN"))
+            # Conexión asíncrona
+            await bot.register_commands() if hasattr(bot, 'register_commands') else None
+            
+            # Usamos una tarea para no bloquear el login
             asyncio.create_task(bot.connect())
             
             # Esperar a que el bot esté listo
@@ -79,6 +85,8 @@ if __name__ == "__main__":
             
             if bot.is_ready():
                 await bot.background_task()
+            else:
+                print("❌ El bot no pudo conectarse a Discord a tiempo.")
         finally:
             await bot.close()
 

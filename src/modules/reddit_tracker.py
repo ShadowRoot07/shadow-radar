@@ -7,11 +7,9 @@ class RedditScraper:
         self.url_template = "https://www.reddit.com/r/{}/new.json?limit=5"
         # Engañamos a Reddit pretendiendo ser el bot de inspección de Google
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-            "Accept": "application/json",
-            "Accept-Language": "en-US,en;q=0.5",
-            "X-Reddit-User-Agent": "Googlebot-Script-ShadowRoot07"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
+
 
     async def get_latest_posts(self, subreddit):
         # Pausa obligatoria: GitHub es demasiado rápido
