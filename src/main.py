@@ -15,7 +15,7 @@ class ShadowRadar(discord.Client):
     async def on_ready(self):
         if self.scanning: return
         self.scanning = True
-        
+
         channel = self.get_channel(int(os.getenv("DISCORD_CHANNEL_ID")))
         if not channel:
             await self.close()
@@ -25,7 +25,7 @@ class ShadowRadar(discord.Client):
             ai = AIHandler()
             scraper = RedditScraper()
 
-            await channel.send("🚀 **Shadow Radar:** Iniciando patrullaje...")
+            await channel.send("🚀 **Shadow Radar:** Iniciando patrullaje con Groq...")
 
             subs_psico = ["desahogo", "psicologia", "ayuda"]
             subs_tech = ["programming", "technology", "python"]
@@ -39,26 +39,25 @@ class ShadowRadar(discord.Client):
                 for sub in group:
                     print(f"🛰️ Patrullando r/{sub}...")
                     posts, error = await scraper.get_latest_posts(sub)
-                    
+
                     if error:
                         print(f"⚠️ Error en r/{sub}: {error}")
                         continue
 
-                    # Solo procesamos los 3 posts más recientes para cuidar la cuota
                     for p in posts[:3]:
-                        # ⏱️ SLEEP ULTRA-SAFE: 10 segundos entre posts
+                        # ⏱️ SLEEP ULTRA-SAFE: 10 segundos entre posts para Groq
                         await asyncio.sleep(10)
 
                         res = await ai.analyze_text(f"{p['title']}\n{p['text']}", prompt)
-                        
+
                         if res == "QUOTA_ERROR":
-                            # Si da error, esperamos 30 segundos y reintentamos UNA vez
-                            print("⏳ Cuota saturada. Reintentando en 30s...")
+                            print("⏳ Cuota saturada en Groq. Reintentando en 30s...")
                             await asyncio.sleep(30)
                             res = await ai.analyze_text(f"{p['title']}\n{p['text']}", prompt)
-                            
+
                             if res == "QUOTA_ERROR":
-                                await channel.send("🛑 **Pausa Forzada:** Cuota diaria de Gemini agotada.")
+                                # 🟢 CAMBIO: Mensaje actualizado a Groq
+                                await channel.send("🛑 **Pausa Forzada:** Límite de Groq alcanzado.")
                                 await self.close()
                                 return
 

@@ -1,58 +1,47 @@
 import os
 import asyncio
-from google import genai
+from groq import Groq
 
 class AIHandler:
     def __init__(self):
-        self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        # Inicializamos el cliente de Groq
+        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.quota_exceeded = False
-        # Lista refinada con versiones específicas y experimentales
-        self.model_candidates = [
-            "gemini-1.5-flash-latest",   # Forzar la última revisión estable
-            "gemini-1.5-flash-002",      # Versión fija (a veces tiene cuota libre)
-            "gemini-1.5-pro-latest",     # A veces el tier Pro tiene cuota cuando Flash no
-            "gemini-2.0-flash-exp"       # Versión experimental de la 2.0
-        ]
-        self.active_model = None
 
     async def analyze_text(self, text, prompt_intro):
         if self.quota_exceeded:
             return "QUOTA_ERROR"
 
-        models_to_try = [self.active_model] if self.active_model else self.model_candidates
-
-        for model_name in models_to_try:
-            if not model_name: continue
+        try:
+            # Usamos Llama 3 8B, que es perfecto para resúmenes rápidos y gratuito
+            # Usamos to_thread para no bloquear el bot de Discord
+            chat_completion = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": f"{prompt_intro}. RESPONDE SIEMPRE EN ESPAÑOL. Si el contenido no es relevante, responde únicamente 'NO'."
+                    },
+                    {
+                        "role": "user", 
+                        "content": f"Analiza este post de Reddit: {text[:1500]}"
+                    }
+                ],
+                model="llama3-8b-8192",
+                temperature=0.5, # Un poco de creatividad pero controlado
+            )
             
-            try:
-                # Reducimos aún más el texto para evitar bloqueos por tamaño de tokens
-                response = await asyncio.to_thread(
-                    self.client.models.generate_content,
-                    model=model_name,
-                    contents=f"{prompt_intro}\n\nContenido: {text[:700]}"
-                )
+            result = chat_completion.choices[0].message.content.strip()
+            return result
 
-                if response and hasattr(response, 'text') and response.text:
-                    self.active_model = model_name
-                    print(f"✅ Éxito con el modelo: {model_name}")
-                    return response.text.strip()
-                
-            except Exception as e:
-                err_msg = str(e).upper()
-                
-                # Si es cuota, probamos el siguiente modelo antes de rendirnos
-                if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
-                    print(f"⚠️ Cuota saturada para {model_name}, intentando siguiente...")
-                    continue
-                
-                if "404" in err_msg or "NOT_FOUND" in err_msg:
-                    print(f"🔍 {model_name} no disponible.")
-                    continue
-                
-                if "SAFETY" in err_msg:
-                    return "NO"
-
-        # Si agotamos todos los modelos y todos dieron 429
-        self.quota_exceeded = True
-        return "QUOTA_ERROR"
+        except Exception as e:
+            err_msg = str(e).upper()
+            print(f"DEBUG AI (Groq): {err_msg}")
+            
+            # Groq también tiene límites (Rate Limits), los capturamos aquí
+            if "429" in err_msg or "RATE_LIMIT" in err_msg:
+                self.quota_exceeded = True
+                return "QUOTA_ERROR"
+            
+            return "NO"
 

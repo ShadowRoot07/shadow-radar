@@ -2,4 +2,4 @@ discord.py
 google-genai
 httpx
 python-dotenv
-
+groq
