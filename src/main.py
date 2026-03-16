@@ -25,13 +25,25 @@ class ShadowRadar(discord.Client):
             ai = AIHandler()
             scraper = RedditScraper()
 
-            await channel.send("🚀 **Shadow Radar:** Iniciando patrullaje con Groq...")
+            await channel.send("🚀 **Shadow Radar:** Iniciando patrullaje especializado...")
 
-            subs_psico = ["desahogo", "psicologia", "ayuda"]
+            # Subreddits estratégicos para las nuevas categorías
+            subs_psico = ["desahogo", "psicologia", "ayuda", "orientacionvocal", "DerechoGenial"]
             subs_tech = ["programming", "technology", "python"]
 
+            # Prompt refinado con las nuevas categorías integradas
+            psico_prompt = (
+                "Analiza si este post encaja en una de estas categorías críticas:\n"
+                "1. CRISIS: Riesgo emocional grave o urgencia.\n"
+                "2. ASILO: Extranjeros que necesitan apoyo psicológico para trámites de asilo o migración.\n"
+                "3. DEPORTE: Atletas que buscan mejorar rendimiento mediante psicología deportiva.\n"
+                "4. VOCACIONAL: Personas que requieren orientación profesional o académica.\n\n"
+                "Si detectas alguna, resume en ESPAÑOL indicando la categoría y por qué es relevante. "
+                "Si no es ninguna de estas, responde únicamente 'NO'."
+            )
+
             all_subs = [
-                (subs_psico, "Analiza si este post muestra crisis emocional grave o riesgo. Resume en ESPAÑOL profesional. Si no es urgente, responde 'NO'.", "🧠 Radar Psico"),
+                (subs_psico, psico_prompt, "🧠 Radar Psico Especializado"),
                 (subs_tech, "Si esta noticia es un hito importante en tecnología o IA, resume en ESPAÑOL. Si no es relevante, responde 'NO'.", "💻 Radar Tech")
             ]
 
@@ -45,7 +57,7 @@ class ShadowRadar(discord.Client):
                         continue
 
                     for p in posts[:3]:
-                        # ⏱️ SLEEP ULTRA-SAFE: 10 segundos entre posts para Groq
+                        # ⏱️ SLEEP ULTRA-SAFE: 10 segundos para respetar Groq
                         await asyncio.sleep(10)
 
                         res = await ai.analyze_text(f"{p['title']}\n{p['text']}", prompt)
@@ -56,7 +68,6 @@ class ShadowRadar(discord.Client):
                             res = await ai.analyze_text(f"{p['title']}\n{p['text']}", prompt)
 
                             if res == "QUOTA_ERROR":
-                                # 🟢 CAMBIO: Mensaje actualizado a Groq
                                 await channel.send("🛑 **Pausa Forzada:** Límite de Groq alcanzado.")
                                 await self.close()
                                 return

@@ -29,7 +29,7 @@ class RedditScraper:
                         # Filtro estricto: solo lo que tiene menos de 40 minutos
                         diff_minutes = (datetime.now(timezone.utc) - dt_updated).total_seconds() / 60
                         
-                        if diff_minutes <= 40:
+                        if diff_minutes <= 500:
                             title = re.search(r'<title>(.*?)</title>', entry).group(1)
                             # Limpiar entidades HTML básicas del título
                             title = title.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")

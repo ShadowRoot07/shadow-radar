@@ -4,23 +4,33 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 */3 * * *'   # Ejecución cada 3 horas
+    - cron: '0 */8 * * *'   # Ejecución cada 8 horas (00:00, 08:00, 16:00 UTC)
   workflow_dispatch:
 
 jobs:
   run-radar:
-    # 🟢 CORRECCIÓN: Antes decía runs-runs-on
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install
-        run: pip install discord.py httpx groq python-dotenv
-      - name: Run
+        run: |
+          pip install discord.py httpx groq python-dotenv pytest pytest-asyncio
+
+      - name: Run Tests
+        # Esta línea hace que los tests SOLO corran si el evento es un 'push'
+        if: github.event_name == 'push'
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: pytest
+
+      - name: Run Bot
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
